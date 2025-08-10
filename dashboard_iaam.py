@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DASHBOARD IAAM PREDICTOR - UMF "Grigore T. Popa" Iași
-Dr. Boghian Lucian - Doctorat Epidemiologie
-
-VALIDAT CONFORM:
-- Ordinul MS 1101/2016 - Normele de supraveghere IAAM
-- CNSCBT - Definiții naționale de caz (2023) 
-- ECDC HAI-Net Protocol v5.3 (2024)
+IAAM PREDICTOR SIMPLU - TEST FUNCȚIONAL
+Dr. Boghian Lucian - UMF "Grigore T. Popa" Iași
+Versiune simplă pentru testare rapidă
 """
 
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 
 # Configurare pagină
 st.set_page_config(
-    page_title="🏥 IAAM Predictor - UMF Iași",
+    page_title="🏥 IAAM Predictor Test",
     page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# CSS modern
+# CSS simplu
 st.markdown("""
 <style>
-    .main-header {
+    .header {
         background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
         padding: 2rem;
         border-radius: 10px;
@@ -37,351 +31,318 @@ st.markdown("""
         margin-bottom: 2rem;
         text-align: center;
     }
-    
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border-left: 4px solid #1e3c72;
-    }
-    
-    .alert-critical {
-        background-color: #f8d7da;
-        border: 1px solid #dc3545;
-        border-radius: 8px;
+    .alert-red {
+        background: #ffe6e6;
+        border-left: 5px solid #ff4444;
         padding: 1rem;
-        color: #721c24;
         margin: 1rem 0;
+        border-radius: 5px;
     }
-    
-    .alert-warning {
-        background-color: #fff3cd;
-        border: 1px solid #ffc107;
-        border-radius: 8px;
+    .alert-orange {
+        background: #fff3e0;
+        border-left: 5px solid #ff9800;
         padding: 1rem;
-        color: #856404;
         margin: 1rem 0;
+        border-radius: 5px;
+    }
+    .alert-yellow {
+        background: #fffde7;
+        border-left: 5px solid #ffeb3b;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 5px;
+    }
+    .alert-green {
+        background: #e8f5e8;
+        border-left: 5px solid #4caf50;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-class IAAMPredictor:
-    def __init__(self):
-        self.version = "2.0 Professional"
-        self.ghiduri = "Ord. 1101/2016, CNSCBT, ECDC"
-        
-        # Baza de date bacterii MDR
-        self.bacterii_mdr = {
-            "Escherichia coli": ["ESBL", "Carbapenemaze", "Ciprofloxacină"],
-            "Klebsiella pneumoniae": ["ESBL", "Carbapenemaze", "Colistină"],
-            "Pseudomonas aeruginosa": ["Carbapenemaze", "Ciprofloxacină", "Meropenem"],
-            "Staphylococcus aureus": ["MRSA", "Vancomicină", "Clindamicină"],
-            "Enterococcus faecalis": ["VRE", "Ampicilină", "Gentamicină"],
-            "Acinetobacter baumannii": ["XDR", "Carbapenemaze", "Colistină"],
-            "Candida albicans": ["Fluconazol", "Voriconazol"]
-        }
+def calculeaza_scor_iaam(date):
+    """Calculează scorul IAAM conform ghidurilor"""
+    scor = 0
+    detalii = []
     
-    def calculeaza_scor_iaam(self, date):
-        """Calculează scorul IAAM conform ghidurilor"""
-        scor = 0
-        detalii = []
+    # 1. VERIFICARE CRITERIU TEMPORAL (obligatoriu)
+    ore = date.get('ore_spitalizare', 0)
+    if ore < 48:
+        return 0, "❌ NU IAAM - Criteriu temporal neîndeplinit", [], []
+    
+    # Punctaj pentru timpul de spitalizare
+    if 48 <= ore < 72:
+        scor += 5
+        detalii.append("⏰ IAAM posibilă (48-72h): +5 puncte")
+    elif 72 <= ore < 168:  # 7 zile
+        scor += 10
+        detalii.append("⏰ IAAM confirmată (3-7 zile): +10 puncte")
+    else:  # >7 zile
+        scor += 15
+        detalii.append("⏰ IAAM tardivă (>7 zile): +15 puncte")
+    
+    # 2. FACTORI CARMELI MDR
+    carmeli_scor = 0
+    if date.get('spitalizare_90zile', False):
+        carmeli_scor += 1
+        scor += 10
+        detalii.append("🏥 Spitalizare în 90 zile: +10 puncte")
+    
+    if date.get('antibiotice_30zile', False):
+        carmeli_scor += 1
+        scor += 15
+        detalii.append("💊 Antibiotice în 30 zile: +15 puncte")
+    
+    if date.get('rezidenta_ilp', False):
+        carmeli_scor += 1
+        scor += 10
+        detalii.append("🏠 Rezidență instituțională: +10 puncte")
+    
+    # Bonus pentru scor Carmeli maxim
+    if carmeli_scor == 3:
+        scor += 10
+        detalii.append("🎯 Bonus Carmeli maxim (3/3): +10 puncte")
+    
+    # 3. DISPOZITIVE INVAZIVE
+    if date.get('cvc', False):
+        scor += 25
+        detalii.append("💉 Cateter venos central: +25 puncte")
+    
+    if date.get('ventilatie', False):
+        scor += 30
+        detalii.append("🫁 Ventilație mecanică: +30 puncte")
+    
+    if date.get('sonda_urinara', False):
+        scor += 15
+        detalii.append("🚽 Sondă urinară: +15 puncte")
+    
+    if date.get('traheostomie', False):
+        scor += 20
+        detalii.append("🦴 Traheostomie: +20 puncte")
+    
+    if date.get('drenaj', False):
+        scor += 10
+        detalii.append("💧 Drenaj activ: +10 puncte")
+    
+    # 4. FACTORI DEMOGRAFICI
+    varsta = date.get('varsta', 0)
+    if varsta > 65:
+        scor += 10
+        detalii.append(f"👴 Vârstă >65 ani ({varsta}): +10 puncte")
+    elif varsta < 1:
+        scor += 15
+        detalii.append(f"👶 Sugar <1 an: +15 puncte")
+    
+    # 5. COMORBIDITĂȚI
+    if date.get('diabet', False):
+        scor += 10
+        detalii.append("🍭 Diabet zaharat: +10 puncte")
+    
+    if date.get('imunosupresie', False):
+        scor += 20
+        detalii.append("🛡️ Imunosupresie: +20 puncte")
+    
+    if date.get('bpoc', False):
+        scor += 8
+        detalii.append("🫁 BPOC: +8 puncte")
+    
+    if date.get('insuf_renala', False):
+        scor += 12
+        detalii.append("🫘 Insuficiență renală: +12 puncte")
+    
+    if date.get('neoplasm', False):
+        scor += 15
+        detalii.append("🎗️ Neoplasm activ: +15 puncte")
+    
+    # 6. PARAMETRI LABORATOR
+    leucocite = date.get('leucocite', 7000)
+    if leucocite > 12000:
+        scor += 8
+        detalii.append(f"🧪 Leucocitoză ({leucocite:,}): +8 puncte")
+    elif leucocite < 4000:
+        scor += 10
+        detalii.append(f"🧪 Leucopenie ({leucocite:,}): +10 puncte")
+    
+    crp = date.get('crp', 5)
+    if crp > 50:
+        scor += 6
+        detalii.append(f"🔥 CRP înalt ({crp} mg/L): +6 puncte")
+    
+    pct = date.get('pct', 0.1)
+    if pct > 2:
+        scor += 12
+        detalii.append(f"⚡ Procalcitonină înaltă ({pct} ng/mL): +12 puncte")
+    
+    # 7. MICROBIOLOGIE
+    if date.get('cultura_pozitiva', False):
+        scor += 10
+        detalii.append("🦠 Cultură pozitivă: +10 puncte")
         
-        # 1. CRITERIUL TEMPORAL (obligatoriu)
-        ore = date.get('ore_spitalizare', 0)
-        if ore < 48:
-            return 0, "❌ Nu îndeplinește criteriul temporal (<48h)", ["Evaluare pentru infecție comunitară"]
-        elif ore < 72:
-            scor += 5
-            detalii.append("⚠️ IAAM posibilă (48-72h)")
-        elif ore < 168:  # 7 zile
-            scor += 10
-            detalii.append("✅ IAAM confirmată (3-7 zile)")
-        else:
+        bacterie = date.get('bacterie', '')
+        if bacterie:
             scor += 15
-            detalii.append("🔴 IAAM tardivă (>7 zile)")
-        
-        # 2. FACTORI CARMELI MDR
-        carmeli = 0
-        if date.get('spitalizare_90zile', False):
-            carmeli += 1
-            scor += 10
-        if date.get('antibiotice_30zile', False):
-            carmeli += 1
-            scor += 15
-        if date.get('rezidenta_ilp', False):
-            carmeli += 1
-            scor += 10
-        
-        if carmeli > 0:
-            detalii.append(f"🎯 Scor Carmeli MDR: {carmeli}/3")
-        
-        # 3. DISPOZITIVE INVAZIVE
-        dispozitive = 0
-        if date.get('cvc', False):
-            dispozitive += 25
-        if date.get('ventilatie', False):
-            dispozitive += 30
-        if date.get('sonda_urinara', False):
-            dispozitive += 15
-        if date.get('traheostomie', False):
-            dispozitive += 20
-        if date.get('drenaj', False):
-            dispozitive += 10
-        
-        scor += dispozitive
-        if dispozitive > 0:
-            detalii.append(f"🔧 Dispozitive invazive: +{dispozitive}p")
-        
-        # 4. FACTORI DEMOGRAFICI
-        varsta = date.get('varsta', 0)
-        if varsta > 65:
-            scor += 10
-            detalii.append(f"👴 Vârstă: {varsta} ani (+10p)")
-        elif varsta < 1:
-            scor += 15
-            detalii.append(f"👶 Sugar: {varsta} ani (+15p)")
-        
-        # 5. COMORBIDITĂȚI
-        comorbid_puncte = 0
-        if date.get('diabet', False):
-            comorbid_puncte += 10
-        if date.get('imunosupresie', False):
-            comorbid_puncte += 20
-        if date.get('bpoc', False):
-            comorbid_puncte += 8
-        if date.get('insuf_renala', False):
-            comorbid_puncte += 12
-        if date.get('neoplasm', False):
-            comorbid_puncte += 15
-        
-        scor += comorbid_puncte
-        if comorbid_puncte > 0:
-            detalii.append(f"🩺 Comorbidități: +{comorbid_puncte}p")
-        
-        # 6. PARAMETRI LABORATOR
-        lab_puncte = 0
-        leucocite = date.get('leucocite', 7000)
-        if leucocite > 12000:
-            lab_puncte += 8
-            detalii.append(f"🧪 Leucocitoză: {leucocite}")
-        elif leucocite < 4000:
-            lab_puncte += 10
-            detalii.append(f"🧪 Leucopenie: {leucocite}")
-        
-        crp = date.get('crp', 5)
-        if crp > 50:
-            lab_puncte += 6
-            detalii.append(f"🧪 CRP înalt: {crp} mg/L")
-        
-        pct = date.get('pct', 0.1)
-        if pct > 2:
-            lab_puncte += 12
-            detalii.append(f"🧪 PCT înalt: {pct} ng/mL")
-        
-        scor += lab_puncte
-        
-        # 7. MICROBIOLOGIE
-        if date.get('cultura_pozitiva', False):
-            bacterie = date.get('bacterie', '')
-            if bacterie:
-                scor += 15
-                detalii.append(f"🦠 Cultură pozitivă: {bacterie}")
-                
-                # Bonus pentru bacterii MDR
-                if bacterie in self.bacterii_mdr:
-                    scor += 10
-                    detalii.append(f"⚠️ Bacterie MDR identificată")
-        
-        # 8. GENERARE RECOMANDĂRI
-        recomandari = self.genereaza_recomandari(scor)
-        nivel_risc = self.determina_nivel_risc(scor)
-        
-        return scor, nivel_risc, detalii, recomandari
+            detalii.append(f"⚠️ Bacterie MDR ({bacterie}): +15 puncte")
     
-    def determina_nivel_risc(self, scor):
-        """Determină nivelul de risc"""
-        if scor >= 100:
-            return "🔴 RISC CRITIC"
-        elif scor >= 75:
-            return "🔴 RISC FOARTE ÎNALT"
-        elif scor >= 50:
-            return "🟠 RISC ÎNALT"
-        elif scor >= 30:
-            return "🟡 RISC MODERAT"
-        else:
-            return "🟢 RISC SCĂZUT"
+    # Determinare nivel risc
+    if scor >= 100:
+        nivel = "🔴 CRITIC"
+        culoare = "red"
+    elif scor >= 75:
+        nivel = "🔴 FOARTE ÎNALT"
+        culoare = "red"
+    elif scor >= 50:
+        nivel = "🟠 ÎNALT"
+        culoare = "orange"
+    elif scor >= 30:
+        nivel = "🟡 MODERAT"
+        culoare = "yellow"
+    else:
+        nivel = "🟢 SCĂZUT"
+        culoare = "green"
     
-    def genereaza_recomandari(self, scor):
-        """Generează recomandări bazate pe scor"""
-        if scor >= 100:
-            return [
-                "🚨 ALERTĂ CPIAAM IMEDIATĂ",
-                "🧪 Screening MDR urgent (2h)",
-                "🔒 Izolare strict până la rezultate",
-                "💊 ATB empirică spectru foarte larg",
-                "📞 Consultare infectionist STAT"
-            ]
-        elif scor >= 75:
-            return [
-                "⏰ Alertă CPIAAM în 2 ore",
-                "🧪 Screening MDR obligatoriu",
-                "🔒 Izolare preventivă",
-                "💊 Considerare ATB spectru larg",
-                "📊 Monitorizare intensivă"
-            ]
-        elif scor >= 50:
-            return [
-                "📞 Consultare CPIAAM în 6h",
-                "🧪 Recoltare culturi complete",
-                "🧤 Precauții contact standard",
-                "📈 Monitorizare zilnică",
-                "🔄 Reevaluare la 48h"
-            ]
-        elif scor >= 30:
-            return [
-                "👁️ Supraveghere activă IAAM",
-                "🧤 Bundle prevenție standard",
-                "📊 Monitorizare parametri",
-                "🔄 Reevaluare la 72h"
-            ]
-        else:
-            return [
-                "👁️ Monitorizare standard",
-                "🧤 Măsuri preventive de bază",
-                "📋 Documentare corespunzătoare"
-            ]
+    # Generare recomandări
+    recomandari = genereaza_recomandari(scor)
     
-    def creeaza_gauge_risc(self, scor, titlu="Scor Risc IAAM"):
-        """Creează gauge pentru afișarea riscului"""
-        if scor >= 75:
-            color = "red"
-            nivel = "CRITIC"
-        elif scor >= 50:
-            color = "orange"
-            nivel = "ÎNALT"
-        elif scor >= 30:
-            color = "yellow"
-            nivel = "MODERAT"
-        else:
-            color = "green"
-            nivel = "SCĂZUT"
-        
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=scor,
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': f"{titlu}<br><span style='font-size:0.8em;color:gray'>Nivel: {nivel}</span>"},
-            gauge={
-                'axis': {'range': [None, 100]},
-                'bar': {'color': color},
-                'steps': [
-                    {'range': [0, 30], 'color': "lightgreen"},
-                    {'range': [30, 50], 'color': "yellow"},
-                    {'range': [50, 75], 'color': "orange"},
-                    {'range': [75, 100], 'color': "red"}
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 75
-                }
+    return scor, nivel, detalii, recomandari
+
+def genereaza_recomandari(scor):
+    """Generează recomandări bazate pe scor"""
+    if scor >= 100:
+        return [
+            "🚨 ALERTĂ CPIAAM IMEDIATĂ (0-30 min)",
+            "🧪 Screening MDR URGENT în 1 oră",
+            "🔒 Izolare STRICTĂ + precauții contact",
+            "💊 Antibioterapie empirică spectru FOARTE LARG",
+            "📞 Consultare infectionist STAT",
+            "📊 Monitorizare parametri vitali la 1h",
+            "🏥 Evaluare transfer ATI dacă instabil"
+        ]
+    elif scor >= 75:
+        return [
+            "⏰ Alertă CPIAAM în 30 minute",
+            "🧪 Screening MDR rapid în 2 ore",
+            "🔒 Izolare preventivă imediată",
+            "💊 Considerare antibioterapie spectru larg",
+            "📈 Monitorizare intensivă la 4h",
+            "🧼 Audit igiena mâinilor"
+        ]
+    elif scor >= 50:
+        return [
+            "📞 Consultare CPIAAM în 2 ore",
+            "🧪 Recoltare culturi complete",
+            "🧤 Precauții contact standard",
+            "💊 Revizuire antibioterapie curentă",
+            "📊 Monitorizare zilnică",
+            "🔄 Reevaluare la 48h"
+        ]
+    elif scor >= 30:
+        return [
+            "👁️ Supraveghere activă IAAM",
+            "🧤 Bundle prevenție standard",
+            "📊 Monitorizare parametri clinici",
+            "🔄 Reevaluare la 72h",
+            "📋 Documentare factori de risc"
+        ]
+    else:
+        return [
+            "📋 Monitorizare standard",
+            "🧤 Măsuri preventive de bază",
+            "📋 Documentare corespunzătoare",
+            "🔄 Reevaluare săptămânală"
+        ]
+
+def creeaza_gauge(scor):
+    """Creează indicator vizual pentru scor"""
+    if scor >= 75:
+        color = "red"
+    elif scor >= 50:
+        color = "orange"
+    elif scor >= 30:
+        color = "yellow"
+    else:
+        color = "green"
+    
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=scor,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Scor IAAM", 'font': {'size': 24}},
+        delta={'reference': 50, 'increasing': {'color': "red"}},
+        gauge={
+            'axis': {'range': [None, 120], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': color},
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, 30], 'color': "lightgreen"},
+                {'range': [30, 50], 'color': "yellow"},
+                {'range': [50, 75], 'color': "orange"},
+                {'range': [75, 120], 'color': "lightcoral"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 90
             }
-        ))
-        
-        fig.update_layout(height=300, margin=dict(l=20, r=20, t=60, b=20))
-        return fig
+        }
+    ))
     
-    def creeaza_grafic_trend(self):
-        """Grafic demonstrativ trend IAAM"""
-        dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='W')
-        cazuri = np.random.poisson(3, len(dates))
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=dates,
-            y=cazuri,
-            mode='lines+markers',
-            name='Cazuri IAAM',
-            line=dict(color='red', width=2),
-            marker=dict(size=4)
-        ))
-        
-        fig.add_hline(y=np.mean(cazuri), 
-                     line_dash="dash", line_color="gray",
-                     annotation_text="Media anuală")
-        
-        fig.update_layout(
-            title="📈 Trend Cazuri IAAM - Ultimele 12 Luni",
-            xaxis_title="Data",
-            yaxis_title="Număr Cazuri",
-            height=400
-        )
-        
-        return fig
+    fig.update_layout(
+        height=350,
+        font={'color': "darkblue", 'family': "Arial"}
+    )
     
-    def creeaza_comparatie_sectii(self):
-        """Grafic comparație secții"""
-        sectii = ['ATI', 'Chirurgie', 'Medicina Internă', 'Pediatrie', 'Cardiologie']
-        rate_iaam = [37.5, 12.8, 8.2, 12.6, 5.3]
-        
-        colors = ['red' if x > 20 else 'orange' if x > 10 else 'green' for x in rate_iaam]
-        
-        fig = go.Figure(go.Bar(
-            x=sectii,
-            y=rate_iaam,
-            marker_color=colors,
-            text=[f"{x:.1f}%" for x in rate_iaam],
-            textposition='auto'
-        ))
-        
-        fig.update_layout(
-            title="🏥 Rata IAAM pe Secții",
-            xaxis_title="Secție",
-            yaxis_title="Rata IAAM (%)",
-            height=400,
-            showlegend=False
-        )
-        
-        return fig
+    return fig
 
 def main():
     """Funcția principală"""
     
-    # Inițializare session state
-    if 'evaluate' not in st.session_state:
-        st.session_state.evaluate = False
-    
-    # Inițializare predictor
-    predictor = IAAMPredictor()
-    
-    # Header principal
+    # Header
     st.markdown("""
-    <div class="main-header">
-        <h1>🏥 SISTEM PREDICȚIE IAAM - DASHBOARD PROFESIONAL</h1>
-        <p>Dr. Boghian Lucian - Doctorat Epidemiologie - UMF "Grigore T. Popa" Iași</p>
-        <p>Validat conform: Ord. 1101/2016 | CNSCBT | ECDC HAI-Net v5.3</p>
+    <div class="header">
+        <h1>🏥 SISTEM PREDICȚIE IAAM - TEST SIMPLU</h1>
+        <p><strong>Dr. Boghian Lucian</strong> - Doctorat Epidemiologie</p>
+        <p>UMF "Grigore T. Popa" Iași</p>
+        <p>Validat: Ord. 1101/2016 • CNSCBT • ECDC HAI-Net v5.3</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # === SIDEBAR PENTRU INPUT ===
-    st.sidebar.header("📋 Evaluare Pacient")
+    # Sidebar pentru introducerea datelor
+    st.sidebar.header("📋 Date Pacient")
     
-    # Date identificare
-    nume_pacient = st.sidebar.text_input("Nume/Cod Pacient", "Pacient Demo")
+    # Date de identificare
+    nume_pacient = st.sidebar.text_input("Nume/Cod Pacient", "Test_001")
     
     # Date temporale
-    st.sidebar.subheader("📅 Date Temporale")
-    ore_spitalizare = st.sidebar.number_input("Ore de la internare", 0, 720, 96)
+    st.sidebar.subheader("📅 Criterii Temporale")
+    ore_spitalizare = st.sidebar.number_input(
+        "Ore de la internare", 
+        min_value=0, 
+        max_value=720, 
+        value=96,
+        help="Timpul scurs de la internare până la suspiciunea de infecție"
+    )
     
     # Factori Carmeli
     st.sidebar.subheader("🎯 Factori Carmeli MDR")
-    spitalizare_90zile = st.sidebar.checkbox("Spitalizare în ultimele 90 zile")
-    antibiotice_30zile = st.sidebar.checkbox("Antibiotice în ultimele 30 zile")
-    rezidenta_ilp = st.sidebar.checkbox("Rezidență în instituție")
+    spitalizare_90zile = st.sidebar.checkbox(
+        "Spitalizare în ultimele 90 zile",
+        help="Pacientul a fost spitalizat în ultimele 3 luni"
+    )
+    antibiotice_30zile = st.sidebar.checkbox(
+        "Antibiotice în ultimele 30 zile",
+        help="Administrare antibiotice în ultima lună"
+    )
+    rezidenta_ilp = st.sidebar.checkbox(
+        "Rezidență în instituție (ILP)",
+        help="Pacient din cămin de bătrâni sau instituție similară"
+    )
     
     # Dispozitive medicale
-    st.sidebar.subheader("🔧 Dispozitive Medicale")
+    st.sidebar.subheader("🔧 Dispozitive Invazive")
     cvc = st.sidebar.checkbox("Cateter venos central")
     ventilatie = st.sidebar.checkbox("Ventilație mecanică")
     sonda_urinara = st.sidebar.checkbox("Sondă urinară")
@@ -390,224 +351,288 @@ def main():
     
     # Date demografice
     st.sidebar.subheader("👤 Date Demografice")
-    varsta = st.sidebar.number_input("Vârsta (ani)", 0, 120, 65)
+    varsta = st.sidebar.number_input("Vârsta (ani)", 0, 120, 70)
     
     # Comorbidități
     st.sidebar.subheader("🩺 Comorbidități")
     diabet = st.sidebar.checkbox("Diabet zaharat")
-    imunosupresie = st.sidebar.checkbox("Imunosupresie")
+    imunosupresie = st.sidebar.checkbox("Imunosupresie/transplant")
     bpoc = st.sidebar.checkbox("BPOC")
     insuf_renala = st.sidebar.checkbox("Insuficiență renală")
     neoplasm = st.sidebar.checkbox("Neoplasm activ")
     
-    # Laboratoare
+    # Analize laborator
     st.sidebar.subheader("🧪 Analize Laborator")
-    leucocite = st.sidebar.number_input("Leucocite (/mmc)", 0, 50000, 7000)
-    crp = st.sidebar.number_input("CRP (mg/L)", 0.0, 500.0, 5.0)
-    pct = st.sidebar.number_input("Procalcitonină (ng/mL)", 0.0, 50.0, 0.1)
+    leucocite = st.sidebar.number_input("Leucocite (/mmc)", 0, 50000, 8500)
+    crp = st.sidebar.number_input("CRP (mg/L)", 0.0, 500.0, 25.0)
+    pct = st.sidebar.number_input("Procalcitonină (ng/mL)", 0.0, 50.0, 0.5)
     
     # Microbiologie
-    st.sidebar.subheader("🦠 Microbiologie")
+    st.sidebar.subheader("🦠 Date Microbiologice")
     cultura_pozitiva = st.sidebar.checkbox("Cultură pozitivă")
+    
     bacterie = ""
     if cultura_pozitiva:
-        bacterie = st.sidebar.selectbox(
-            "Bacterie identificată",
-            [""] + list(predictor.bacterii_mdr.keys())
-        )
+        bacterii_disponibile = [
+            "",
+            "Escherichia coli",
+            "Klebsiella pneumoniae", 
+            "Pseudomonas aeruginosa",
+            "Staphylococcus aureus",
+            "Enterococcus faecalis",
+            "Acinetobacter baumannii",
+            "Candida albicans"
+        ]
+        bacterie = st.sidebar.selectbox("Bacterie identificată", bacterii_disponibile)
     
-    # Buton evaluare
-    if st.sidebar.button("🔍 EVALUEAZĂ RISC IAAM", type="primary"):
-        st.session_state.evaluate = True
-    
-    # Reset
-    if st.sidebar.button("🔄 Reset"):
-        st.session_state.evaluate = False
-        st.rerun()
-    
-    # === MAIN DASHBOARD ===
-    
-    # Pregătire date pentru evaluare
-    date_pacient = {
-        'nume_pacient': nume_pacient,
-        'ore_spitalizare': ore_spitalizare,
-        'spitalizare_90zile': spitalizare_90zile,
-        'antibiotice_30zile': antibiotice_30zile,
-        'rezidenta_ilp': rezidenta_ilp,
-        'cvc': cvc,
-        'ventilatie': ventilatie,
-        'sonda_urinara': sonda_urinara,
-        'traheostomie': traheostomie,
-        'drenaj': drenaj,
-        'varsta': varsta,
-        'diabet': diabet,
-        'imunosupresie': imunosupresie,
-        'bpoc': bpoc,
-        'insuf_renala': insuf_renala,
-        'neoplasm': neoplasm,
-        'leucocite': leucocite,
-        'crp': crp,
-        'pct': pct,
-        'cultura_pozitiva': cultura_pozitiva,
-        'bacterie': bacterie
-    }
-    
-    # Evaluare dacă butonul a fost apăsat
-    if st.session_state.get('evaluate', False):
+    # Buton pentru calcularea scorului
+    if st.sidebar.button("🔍 CALCULEAZĂ SCOR IAAM", type="primary"):
         
-        try:
-            # Calculare scor
-            scor, nivel_risc, detalii, recomandari = predictor.calculeaza_scor_iaam(date_pacient)
+        # Pregătire date pentru calcul
+        date_pacient = {
+            'nume_pacient': nume_pacient,
+            'ore_spitalizare': ore_spitalizare,
+            'spitalizare_90zile': spitalizare_90zile,
+            'antibiotice_30zile': antibiotice_30zile,
+            'rezidenta_ilp': rezidenta_ilp,
+            'cvc': cvc,
+            'ventilatie': ventilatie,
+            'sonda_urinara': sonda_urinara,
+            'traheostomie': traheostomie,
+            'drenaj': drenaj,
+            'varsta': varsta,
+            'diabet': diabet,
+            'imunosupresie': imunosupresie,
+            'bpoc': bpoc,
+            'insuf_renala': insuf_renala,
+            'neoplasm': neoplasm,
+            'leucocite': leucocite,
+            'crp': crp,
+            'pct': pct,
+            'cultura_pozitiva': cultura_pozitiva,
+            'bacterie': bacterie
+        }
+        
+        # Calculare scor
+        scor, nivel_risc, detalii, recomandari = calculeaza_scor_iaam(date_pacient)
+        
+        # Afișare rezultate
+        if scor == 0:
+            st.error("❌ **PACIENTUL NU ÎNDEPLINEȘTE CRITERIUL TEMPORAL PENTRU IAAM**")
+            st.info("**Recomandare:** Evaluați pentru infecție comunitară (< 48h de la internare)")
+        else:
+            # Metrici principale
+            col1, col2, col3, col4 = st.columns(4)
             
-            if scor == 0:
-                st.error("❌ **PACIENTUL NU ÎNDEPLINEȘTE CRITERIUL TEMPORAL PENTRU IAAM**")
-                st.info("Evaluați pentru infecție comunitară")
+            with col1:
+                st.metric(
+                    label="🎯 Scor Total IAAM",
+                    value=f"{scor} puncte",
+                    delta=f"vs. medie (45p)"
+                )
+            
+            with col2:
+                nivel_text = nivel_risc.split(' ', 1)[1] if ' ' in nivel_risc else nivel_risc
+                st.metric(
+                    label="📊 Nivel Risc",
+                    value=nivel_text,
+                    delta="Evaluare automată"
+                )
+            
+            with col3:
+                carmeli_total = sum([spitalizare_90zile, antibiotice_30zile, rezidenta_ilp])
+                st.metric(
+                    label="🎯 Scor Carmeli",
+                    value=f"{carmeli_total}/3",
+                    delta="MDR predictor"
+                )
+            
+            with col4:
+                st.metric(
+                    label="⏱️ Data Evaluării",
+                    value=datetime.now().strftime("%H:%M"),
+                    delta=datetime.now().strftime("%d.%m.%Y")
+                )
+            
+            # Gauge și detalii
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                # Gauge indicator
+                fig_gauge = creeaza_gauge(scor)
+                st.plotly_chart(fig_gauge, use_container_width=True)
+            
+            with col2:
+                # Detalii calcul
+                st.subheader("📋 Detalii Calcul Scor")
+                for detaliu in detalii:
+                    st.write(f"• {detaliu}")
+            
+            # Alertă bazată pe risc
+            if scor >= 100:
+                st.markdown(
+                    f'<div class="alert-red"><strong>🚨 ALERTĂ CRITICĂ IAAM</strong><br>'
+                    f'Scor: {scor} puncte - ACȚIUNE IMEDIATĂ NECESARĂ!</div>',
+                    unsafe_allow_html=True
+                )
+            elif scor >= 75:
+                st.markdown(
+                    f'<div class="alert-red"><strong>🔴 RISC FOARTE ÎNALT</strong><br>'
+                    f'Scor: {scor} puncte - Măsuri urgente necesare</div>',
+                    unsafe_allow_html=True
+                )
+            elif scor >= 50:
+                st.markdown(
+                    f'<div class="alert-orange"><strong>🟠 RISC ÎNALT</strong><br>'
+                    f'Scor: {scor} puncte - Supraveghere activă</div>',
+                    unsafe_allow_html=True
+                )
+            elif scor >= 30:
+                st.markdown(
+                    f'<div class="alert-yellow"><strong>🟡 RISC MODERAT</strong><br>'
+                    f'Scor: {scor} puncte - Monitorizare atentă</div>',
+                    unsafe_allow_html=True
+                )
             else:
-                # Row 1: Metrici principale
-                col1, col2, col3, col4 = st.columns(4)
+                st.markdown(
+                    f'<div class="alert-green"><strong>🟢 RISC SCĂZUT</strong><br>'
+                    f'Scor: {scor} puncte - Monitorizare standard</div>',
+                    unsafe_allow_html=True
+                )
+            
+            # Recomandări clinice
+            st.subheader("💡 Recomandări Clinice")
+            
+            for i, recomandare in enumerate(recomandari, 1):
+                st.write(f"**{i}.** {recomandare}")
+            
+            # Informații microbiologice
+            if cultura_pozitiva and bacterie:
+                st.subheader("🦠 Informații Microbiologice")
+                st.info(f"**Bacterie identificată:** {bacterie}")
                 
-                with col1:
-                    st.metric("🎯 Scor Total IAAM", f"{scor} puncte", f"vs. medie (45p)")
+                # Informații despre rezistențe posibile
+                bacterii_mdr_info = {
+                    "Escherichia coli": "Posibile rezistențe: ESBL, Carbapenemaze",
+                    "Klebsiella pneumoniae": "Posibile rezistențe: ESBL, Carbapenemaze, Colistină",
+                    "Pseudomonas aeruginosa": "Posibile rezistențe: Carbapenemaze, Quinolone",
+                    "Staphylococcus aureus": "Posibile rezistențe: MRSA, Vancomicină",
+                    "Enterococcus faecalis": "Posibile rezistențe: VRE, Ampicilină",
+                    "Acinetobacter baumannii": "Posibile rezistențe: XDR, Carbapenemaze",
+                    "Candida albicans": "Posibile rezistențe: Azoli"
+                }
                 
-                with col2:
-                    nivel_text = nivel_risc.split(' ')[1] if ' ' in nivel_risc else nivel_risc
-                    st.metric("📊 Nivel Risc", nivel_text, "Evaluare automată")
-                
-                with col3:
-                    carmeli_score = sum([spitalizare_90zile, antibiotice_30zile, rezidenta_ilp])
-                    st.metric("🎯 Scor Carmeli", f"{carmeli_score}/3", "MDR predictor")
-                
-                with col4:
-                    st.metric("⏱️ Evaluare", datetime.now().strftime("%H:%M"), "Timp real")
-                
-                # Row 2: Gauge și predicție ML
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    fig_gauge = predictor.creeaza_gauge_risc(scor, "Scor Risc IAAM")
-                    st.plotly_chart(fig_gauge, use_container_width=True)
-                
-                with col2:
-                    # Simulare predicție ML
-                    ml_score = min(100, max(0, scor + np.random.normal(0, 5)))
-                    fig_ml = predictor.creeaza_gauge_risc(int(ml_score), "Predicție ML")
-                    st.plotly_chart(fig_ml, use_container_width=True)
-                
-                # Row 3: Detalii și recomandări
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.subheader("📋 Criterii Evaluate")
-                    for i, detaliu in enumerate(detalii, 1):
-                        st.write(f"{i}. {detaliu}")
-                    
-                    # Date microbiologice
-                    if cultura_pozitiva and bacterie:
-                        st.subheader("🦠 Date Microbiologice")
-                        st.info(f"**Bacterie:** {bacterie}")
-                        if bacterie in predictor.bacterii_mdr:
-                            st.warning(f"**Posibile rezistențe:** {', '.join(predictor.bacterii_mdr[bacterie])}")
-                
-                with col2:
-                    st.subheader("💡 Recomandări Clinice")
-                    
-                    # Alertă critică
-                    if scor >= 100:
-                        st.markdown('<div class="alert-critical">🚨 <strong>ALERTĂ CRITICĂ IAAM</strong></div>', 
-                                  unsafe_allow_html=True)
-                    elif scor >= 75:
-                        st.markdown('<div class="alert-warning">⚠️ <strong>RISC FOARTE ÎNALT IAAM</strong></div>', 
-                                  unsafe_allow_html=True)
-                    
-                    for i, rec in enumerate(recomandari, 1):
-                        st.write(f"{i}. {rec}")
-                    
-                    # Timeline urmărire
-                    st.subheader("⏰ Timeline Urmărire")
-                    if scor >= 75:
-                        st.write("- 🕐 **Imediat:** Alertă CPIAAM")
-                        st.write("- 🕑 **2h:** Screening MDR")
-                        st.write("- 🕕 **6h:** Reevaluare clinică")
-                    else:
-                        st.write("- 🕕 **6h:** Consultare CPIAAM")
-                        st.write("- 📅 **24h:** Monitorizare evoluție")
-                        st.write("- 📅 **72h:** Reevaluare completă")
-                
-                # Raport pentru export
-                st.subheader("📄 Raport Detaliat")
-                
-                raport = f"""
-**RAPORT EVALUARE RISC IAAM**
-- **Pacient:** {nume_pacient}
-- **Data evaluării:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-- **Versiune sistem:** {predictor.version}
+                if bacterie in bacterii_mdr_info:
+                    st.warning(f"⚠️ {bacterii_mdr_info[bacterie]}")
+            
+            # Raport pentru export
+            st.subheader("📄 Raport Detaliat pentru Export")
+            
+            raport_text = f"""
+RAPORT EVALUARE RISC IAAM
+========================================
 
-**REZULTATE:**
-- **Scor total:** {scor} puncte
-- **Nivel risc:** {nivel_risc}
-- **Criterii îndeplinite:** {len(detalii)}
+IDENTIFICARE PACIENT:
+- Nume/Cod: {nume_pacient}
+- Data evaluării: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
+- Evaluator: Dr. Boghian Lucian
 
-**FACTORI DE RISC:**
-- Ore spitalizare: {ore_spitalizare}h
-- Scor Carmeli: {carmeli_score}/3
-- Vârsta: {varsta} ani
-- Cultură pozitivă: {'Da' if cultura_pozitiva else 'Nu'}
+REZULTATE EVALUARE:
+- Scor total IAAM: {scor} puncte
+- Nivel de risc: {nivel_risc}
+- Ore de spitalizare: {ore_spitalizare}h
+- Scor Carmeli MDR: {sum([spitalizare_90zile, antibiotice_30zile, rezidenta_ilp])}/3
 
-**RECOMANDĂRI:**
-{chr(10).join([f"- {rec}" for rec in recomandari])}
+FACTORI DE RISC IDENTIFICAȚI:
+{chr(10).join([f"- {detaliu}" for detaliu in detalii])}
 
-**REFERINȚE:**
-- Ord. MS 1101/2016 - Art. 3, 5, 7
-- CNSCBT - Definiții IAAM 2023
+RECOMANDĂRI CLINICE:
+{chr(10).join([f"{i}. {rec}" for i, rec in enumerate(recomandari, 1)])}
+
+VALIDĂRI:
+- Conform Ordinul MS 1101/2016
+- CNSCBT - Definiții naționale
 - ECDC HAI-Net Protocol v5.3
-                """
-                
-                st.text_area("Raport pentru copiere", raport, height=300)
-                
-                # Buton descărcare
+
+CONTACT:
+UMF "Grigore T. Popa" Iași
+Dr. Boghian Lucian - Doctorat Epidemiologie
+            """
+            
+            st.text_area("Raport complet", raport_text, height=400)
+            
+            # Butoane pentru export
+            col1, col2 = st.columns(2)
+            
+            with col1:
                 st.download_button(
-                    label="📥 Descarcă Raport JSON",
-                    data=json.dumps(date_pacient, indent=2, ensure_ascii=False),
-                    file_name=f"raport_iaam_{nume_pacient}_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                    label="📥 Descarcă Raport TXT",
+                    data=raport_text,
+                    file_name=f"raport_iaam_{nume_pacient}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                    mime="text/plain"
+                )
+            
+            with col2:
+                # Export JSON pentru integrare
+                date_export = {
+                    **date_pacient,
+                    'scor_calculat': scor,
+                    'nivel_risc': nivel_risc,
+                    'data_evaluare': datetime.now().isoformat(),
+                    'recomandari': recomandari
+                }
+                
+                st.download_button(
+                    label="📥 Descarcă Date JSON",
+                    data=json.dumps(date_export, indent=2, ensure_ascii=False),
+                    file_name=f"date_iaam_{nume_pacient}_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                     mime="application/json"
                 )
-        
-        except Exception as e:
-            st.error(f"❌ Eroare la calcularea scorului: {str(e)}")
     
-    # === DASHBOARD GENERAL (MEREU VIZIBIL) ===
-    st.subheader("📊 Dashboard General IAAM")
+    # Reset button
+    if st.sidebar.button("🔄 Resetare Formular"):
+        st.rerun()
     
-    col1, col2 = st.columns(2)
+    # Informații generale (întotdeauna vizibile)
+    st.subheader("📊 Informații Generale IAAM")
     
-    with col1:
-        fig_trend = predictor.creeaza_grafic_trend()
-        st.plotly_chart(fig_trend, use_container_width=True)
-    
-    with col2:
-        fig_sections = predictor.creeaza_comparatie_sectii()
-        st.plotly_chart(fig_sections, use_container_width=True)
-    
-    # Statistici rapide
-    st.subheader("📈 Statistici Rapide")
-    
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Cazuri IAAM azi", "3", "↑ 1")
+        st.info("""
+        **🎯 Scor Carmeli MDR:**
+        - 0 puncte: Risc scăzut MDR
+        - 1 punct: Risc moderat MDR  
+        - 2 puncte: Risc înalt MDR
+        - 3 puncte: Risc maxim MDR
+        """)
+    
     with col2:
-        st.metric("Rata săptămânală", "12.5%", "↓ 2.3%")
+        st.info("""
+        **📊 Interpretare Scor:**
+        - 0-29p: 🟢 Risc scăzut
+        - 30-49p: 🟡 Risc moderat
+        - 50-74p: 🟠 Risc înalt
+        - 75+p: 🔴 Risc critic
+        """)
+    
     with col3:
-        st.metric("Secții monitorizate", "15", "→")
-    with col4:
-        st.metric("Alerte active", "2", "↑ 1")
+        st.info("""
+        **⏰ Timeline Acțiuni:**
+        - Risc critic: Alertă în 30 min
+        - Risc înalt: Consultare în 2h
+        - Risc moderat: Monitorizare zilnică
+        - Risc scăzut: Evaluare standard
+        """)
     
     # Footer
     st.markdown("---")
     st.markdown("""
-    <div style='text-align: center; color: gray;'>
-        <p>🏥 IAAM Predictor v2.0 | UMF "Grigore T. Popa" Iași | Dr. Boghian Lucian</p>
-        <p>Validat conform Ord. 1101/2016, CNSCBT, ECDC HAI-Net Protocol v5.3</p>
+    <div style='text-align: center; color: gray; font-size: 14px;'>
+        <p><strong>🏥 SISTEM PREDICȚIE IAAM v2.0</strong></p>
+        <p>UMF "Grigore T. Popa" Iași | Dr. Boghian Lucian | Doctorat Epidemiologie</p>
+        <p>Validat conform: Ord. 1101/2016 • CNSCBT • ECDC HAI-Net Protocol v5.3</p>
+        <p><em>Pentru suport tehnic sau întrebări clinice, contactați departamentul de Epidemiologie</em></p>
     </div>
     """, unsafe_allow_html=True)
 
