@@ -3,12 +3,14 @@
 """
 EpiMind — IAAM Predictor (Single-file, Professional, Mobile-friendly)
 UMF "Grigore T. Popa" Iași — Dr. Boghian Lucian
-Version: 2.1.0 — Complete single-file Streamlit application (completed)
+Version: 2.2.0 — Complete single-file Streamlit application (Analize adăugate)
 
-This file is the finished, self-contained version with the menu button placed top-left,
-extensive comorbidity catalogue, responsive UI, audit and export functions.
+Această versiune adaugă o secțiune profesională "Analize" cu markeri biologici importanți
+(WBC, Neutrofile, CRP, VSH/ESR, Procalcitonină, Presepsină, Lactat, Hemocultură) și integrează
+acești markeri în motorul de risc IAAM printr-un modul de scor dedicat.
 
-Run: streamlit run EpiMind_IAAM_Predictor_2_1_Completed.py
+Rulează:
+    streamlit run EpiMind_IAAM_Predictor_Full.py
 """
 
 from __future__ import annotations
@@ -20,19 +22,19 @@ import json
 from datetime import datetime
 from pathlib import Path
 import os
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 
 # ---------------- App configuration ----------------
 APP_TITLE = "EpiMind — IAAM Predictor"
 APP_ICON = "🏥"
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 AUDIT_CSV = "epimind_audit.csv"
 EXPORT_DIR = Path("exports")
 EXPORT_DIR.mkdir(exist_ok=True)
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide", initial_sidebar_state="collapsed")
 
-# ---------------- Minimal responsive CSS ----------------
+# ---------------- Minimal responsive CSS (improved) ----------------
 st.markdown(
     """
     <style>
@@ -63,7 +65,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------------- Domain knowledge ----------------
+# ---------------- Domain knowledge (concise but extensible) ----------------
 REZISTENTA_PROFILE = {
     "Escherichia coli": ["ESBL", "CRE", "AmpC", "NDM-1", "CTX-M"],
     "Klebsiella pneumoniae": ["ESBL", "CRE", "KPC", "NDM", "OXA-48"],
@@ -83,13 +85,14 @@ ICD_CODES = {
     "Clostridioides difficile": "A04.7",
 }
 
+# Extensive comorbidity catalogue
 COMORBIDITATI = {
     "Cardiovascular": {
         "Hipertensiune arterială": {"Controlată": 3, "Necontrolată": 6, "Criză HTA": 12},
         "Insuficiență cardiacă": {"NYHA I": 3, "NYHA II": 5, "NYHA III": 10, "NYHA IV": 15},
         "Cardiopatie ischemică": {"Stabilă": 5, "Instabilă": 10},
         "Infarct miocardic anterior": 8,
-        "Intervenții coronariene" : {"PCI": 5, "CABG": 7},
+        "Intervenții coronariene": {"PCI": 5, "CABG": 7},
         "Aritmii": {"FA paroxistică": 5, "FA permanentă": 7, "TV/TVS": 10},
         "Valvulopatii semnificative": 8,
         "Boală arterială periferică": 7,
@@ -176,9 +179,10 @@ COMORBIDITATI = {
     }
 }
 
-# ---------------- Calculators ----------------
+# ---------------- Calculators (detailed docstrings) ----------------
 
 def calculate_sofa_detailed(data: Dict[str, Any]) -> Tuple[int, Dict[str, int]]:
+    """Calculate an extended SOFA score with component breakdown."""
     components = {"Respirator": 0, "Coagulare": 0, "Hepatic": 0, "Cardiovascular": 0, "SNC": 0, "Renal": 0}
     pao2_fio2 = data.get("pao2_fio2", 400)
     if pao2_fio2 < 400:
@@ -241,6 +245,7 @@ def calculate_sofa_detailed(data: Dict[str, Any]) -> Tuple[int, Dict[str, int]]:
 
 
 def calculate_qsofa(data: Dict[str, Any]) -> int:
+    """Compute qSOFA: TAS<100, FR>=22, Glasgow<15"""
     score = 0
     tas = data.get("tas", 120)
     fr = data.get("fr", 18)
@@ -255,6 +260,7 @@ def calculate_qsofa(data: Dict[str, Any]) -> int:
 
 
 def calculate_apache_like(data: Dict[str, Any]) -> int:
+    """A pragmatic APACHE-II-like aggregate (not a substitute for validated APACHE II)."""
     score = 0
     temp = data.get("temperatura", 37.0)
     if temp >= 41 or temp < 30:
@@ -308,6 +314,7 @@ def calculate_apache_like(data: Dict[str, Any]) -> int:
 
 
 def analyze_urinary_sediment(date: Dict[str, Any]) -> Tuple[List[str], int]:
+    """Detailed urinary sediment interpretation returning lines of interpretation and a risk % (0-100)."""
     interp = []
     risk = 0
     leu = date.get("leu_urina", 0)
@@ -357,6 +364,7 @@ def analyze_urinary_sediment(date: Dict[str, Any]) -> Tuple[List[str], int]:
 
 
 def calculate_charlson_like(comorbidities: Dict[str, Dict[str, Any]]) -> int:
+    """Simplified Charlson-like aggregate based on the COMORBIDITATI mapping."""
     score = 0
     for cat, conds in (comorbidities or {}).items():
         for cond, sev in conds.items():
@@ -372,9 +380,144 @@ def calculate_charlson_like(comorbidities: Dict[str, Dict[str, Any]]) -> int:
                 score += 5
     return score
 
-# ---------------- IAAM engine ----------------
+# ---------------- Laboratory module (new) ----------------
+
+def score_laboratory_markers(labs: Dict[str, Any]) -> Tuple[int, List[str]]:
+    """
+    Evaluate key laboratory markers and return a numeric lab score plus descriptive lines.
+
+    Markers considered (orientation/pragmatic thresholds):
+      - wbc: leucocite (x10^3/µL)
+      - neut_abs: neutrofile absolute (x10^3/µL)
+      - neut_pct: neutrophils percent
+      - crp: CRP (mg/L)
+      - esr: VSH/ESR (mm/h)
+      - pct: procalcitonin (ng/mL)
+      - presepsin: presepsin (pg/mL)
+      - lactate: lactat (mmol/L)
+      - blood_culture_positive: True/False
+    """
+    score = 0
+    lines: List[str] = []
+
+    if not labs:
+        return 0, ["Fără analize disponibile"]
+
+    # WBC
+    wbc = labs.get('wbc')
+    if wbc is not None:
+        try:
+            w = float(wbc)
+            if w >= 12:
+                score += 10
+                lines.append(f"Leucocitoză: WBC {w} (>12) +10")
+            elif w < 4:
+                score += 10
+                lines.append(f"Leucopenie: WBC {w} (<4) +10")
+            else:
+                lines.append(f"WBC: {w} (normal) +0")
+        except Exception:
+            lines.append(f"WBC: valoare nevalidă: {wbc}")
+
+    # Neutrophils absolute or percent
+    neut_abs = labs.get('neut_abs')
+    neut_pct = labs.get('neut_pct')
+    if neut_abs:
+        try:
+            na = float(neut_abs)
+            if na >= 8:
+                score += 5; lines.append(f"Neutrofilie absolută: {na} (+5)")
+        except Exception:
+            pass
+    elif neut_pct:
+        try:
+            npct = float(neut_pct)
+            if npct >= 80:
+                score += 3; lines.append(f"Neutrofile%: {npct}% (+3)")
+        except Exception:
+            pass
+
+    # CRP
+    crp = labs.get('crp')
+    if crp is not None:
+        try:
+            c = float(crp)
+            if c >= 100:
+                score += 15; lines.append(f"CRP {c} mg/L — mare inflamație (+15)")
+            elif c >= 50:
+                score += 8; lines.append(f"CRP {c} mg/L — moderat (+8)")
+            else:
+                lines.append(f"CRP {c} mg/L — scăzut (+0)")
+        except Exception:
+            lines.append(f"CRP: valoare nevalidă: {crp}")
+
+    # VSH / ESR
+    esr = labs.get('esr')
+    if esr is not None:
+        try:
+            e = float(esr)
+            if e >= 50:
+                score += 6; lines.append(f"VSH {e} mm/h — crescut (+6)")
+            else:
+                lines.append(f"VSH {e} mm/h — normal/moderat (+0)")
+        except Exception:
+            lines.append(f"VSH: valoare nevalidă: {esr}")
+
+    # Procalcitonin
+    pct = labs.get('pct')
+    if pct is not None:
+        try:
+            p = float(pct)
+            if p >= 2.0:
+                score += 20; lines.append(f"Procalcitonină {p} ng/mL — mare probabilitate infecție severă (+20)")
+            elif p >= 0.5:
+                score += 10; lines.append(f"Procalcitonină {p} ng/mL — sugestivă (+10)")
+            else:
+                lines.append(f"Procalcitonină {p} ng/mL — scăzută (+0)")
+        except Exception:
+            lines.append(f"PCT: valoare nevalidă: {pct}")
+
+    # Presepsin (orientativ)
+    presepsin = labs.get('presepsin')
+    if presepsin is not None:
+        try:
+            ps = float(presepsin)
+            if ps >= 600:
+                score += 20; lines.append(f"Presepsină {ps} pg/mL — foarte crescută (+20)")
+            elif ps >= 300:
+                score += 10; lines.append(f"Presepsină {ps} pg/mL — crescută (+10)")
+            else:
+                lines.append(f"Presepsină {ps} pg/mL — normală/negativă (+0)")
+        except Exception:
+            lines.append(f"Presepsină: valoare nevalidă: {presepsin}")
+
+    # Lactate
+    lact = labs.get('lactate')
+    if lact is not None:
+        try:
+            l = float(lact)
+            if l >= 4.0:
+                score += 20; lines.append(f"Lactat {l} mmol/L — hiperlactatemie (+20)")
+            elif l >= 2.0:
+                score += 10; lines.append(f"Lactat {l} mmol/L — ridicat (+10)")
+            else:
+                lines.append(f"Lactat {l} mmol/L — normal (+0)")
+        except Exception:
+            lines.append(f"Lactat: valoare nevalidă: {lact}")
+
+    # Hemocultura
+    hemoc = labs.get('blood_culture_positive')
+    if hemoc:
+        score += 25
+        lines.append("Hemocultură pozitivă — contribuție majoră (+25)")
+
+    score = max(0, int(score))
+    return score, lines
+
+# ---------------- Core IAAM deterministic risk engine (updated with labs) ----------------
 
 def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], List[str]]:
+    """Deterministic IAAM risk engine extended with laboratory markers."""
     hours = payload.get("ore_spitalizare", 0) or 0
     details: List[str] = []
     score = 0
@@ -382,6 +525,7 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
     if hours < 48:
         return 0, "NU IAAM (temporal)", [f"Internare {hours}h <48h: criteriu temporal negat"], ["Monitorizare clinică"]
 
+    # Temporal
     if 48 <= hours < 72:
         score += 5; details.append(f"Timp spitalizare: {hours}h (+5)")
     elif hours < 168:
@@ -389,6 +533,7 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
     else:
         score += 15; details.append(f"Timp spitalizare: {hours}h (+15)")
 
+    # Devices
     device_weights = {"CVC": 20, "Ventilatie": 25, "Sonda urinara": 15, "Traheostomie": 20, "Drenaj": 10, "PEG": 12}
     for dev, info in (payload.get("dispozitive") or {}).items():
         if info.get("prezent"):
@@ -399,6 +544,7 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
             score += add
             details.append(f"{dev} ({zile} zile): +{add}")
 
+    # Microbiology
     if payload.get("cultura_pozitiva"):
         agent = payload.get("bacterie", "")
         score += 15
@@ -408,6 +554,7 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
             score += rez_pts
             details.append(f"Rezistență {rez}: +{rez_pts}")
 
+    # Severity scores
     sofa_val, sofa_comp = calculate_sofa_detailed(payload)
     if sofa_val > 0:
         score += sofa_val * 3
@@ -420,9 +567,10 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
 
     apache_val = calculate_apache_like(payload)
     if apache_val > 0:
-        score += int(apache_val/2)
+        score += int(apache_val / 2)
         details.append(f"APACHE-like: {apache_val} (+{int(apache_val/2)})")
 
+    # Urine
     if payload.get("analiza_urina"):
         interp, risc = analyze_urinary_sediment(payload.get('sediment', {}))
         if risc > 50:
@@ -430,25 +578,35 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
             details.append(f"Risc ITU: {risc}% (+10)")
         details.extend([f"Urină: {line}" for line in interp])
 
+    # Comorbidities
     charlson = calculate_charlson_like(payload.get("comorbiditati", {}))
     if charlson > 0:
         score += charlson
         details.append(f"Comorbidități (sumă puncte): +{charlson}")
 
-    if score >= 100:
+    # Laboratory markers
+    lab_score, lab_lines = score_laboratory_markers(payload.get('analize', {}))
+    if lab_score > 0:
+        score += lab_score
+        details.append(f"Markeri biologici: +{lab_score}")
+        details.extend(lab_lines)
+
+    # Final level & recommendations
+    if score >= 120:
         level = "CRITIC"
         recs = [
             "Izolare imediată și notificare CPIAAM",
             "Consult infecționist urgent",
-            "Recoltare probe și inițiere ATB empirică largă conform protocoalelor locale"
+            "Recoltare probe și inițiere ATB empirică largă conform protocoalelor locale",
+            "Monitorizare intensivă și considerare terapie suport (vasopresoare, ventilație)"
         ]
-    elif score >= 75:
+    elif score >= 90:
         level = "FOARTE ÎNALT"
         recs = ["Consult infecționist în 2h", "Recoltare culturi și antibiogramă", "Izolare preventivă"]
-    elif score >= 50:
+    elif score >= 60:
         level = "ÎNALT"
         recs = ["Supraveghere activă IAAM", "Recoltare culturi țintite", "Monitorizare parametri la 8h"]
-    elif score >= 30:
+    elif score >= 35:
         level = "MODERAT"
         recs = ["Monitorizare extinsă", "Documentare completă în fișa de observație"]
     else:
@@ -457,9 +615,10 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
 
     return int(score), level, details, recs
 
-# ---------------- Helpers ----------------
+# ---------------- Helpers: defaults, payload and audit (updated to include analize) ----------------
 
 def init_defaults():
+    """Initialize session state defaults to keep UI stateless and reproducible."""
     defaults = {
         'nume_pacient': 'Pacient_001', 'cnp': '', 'sectie': 'ATI',
         'ore_spitalizare': 96, 'pao2_fio2': 400, 'trombocite': 200,
@@ -468,14 +627,14 @@ def init_defaults():
         'tas': 120, 'fr': 18, 'cultura_pozitiva': False,
         'bacterie': '', 'profil_rezistenta': [], 'tip_infectie': list(ICD_CODES.keys())[0],
         'comorbiditati_selectate': {}, 'analiza_urina': False, 'sediment': {},
-        'show_nav': True, 'current_page': 'home', 'last_result': None
+        'analize': {}, 'show_nav': True, 'current_page': 'home', 'last_result': None
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-
 def collect_payload() -> Dict[str, Any]:
+    """Gather current session state into a structured payload for scoring and export."""
     payload = {
         'nume_pacient': st.session_state.get('nume_pacient'),
         'cnp': st.session_state.get('cnp'),
@@ -498,6 +657,7 @@ def collect_payload() -> Dict[str, Any]:
         'comorbiditati': st.session_state.get('comorbiditati_selectate'),
         'analiza_urina': st.session_state.get('analiza_urina'),
         'sediment': st.session_state.get('sediment'),
+        'analize': st.session_state.get('analize', {}),
     }
     devices = ['CVC', 'Ventilatie', 'Sonda urinara', 'Traheostomie', 'Drenaj', 'PEG']
     for d in devices:
@@ -507,8 +667,8 @@ def collect_payload() -> Dict[str, Any]:
         }
     return payload
 
-
 def append_audit(result: Dict[str, Any]):
+    """Append a single result to the local CSV audit file. Minimal columns for privacy."""
     row = {
         'timestamp': result['timestamp'],
         'pacient': result['payload'].get('nume_pacient'),
@@ -525,7 +685,6 @@ def append_audit(result: Dict[str, Any]):
     else:
         df.to_csv(AUDIT_CSV, mode='a', header=False, index=False)
 
-
 def load_audit_df() -> pd.DataFrame:
     if Path(AUDIT_CSV).exists():
         try:
@@ -534,7 +693,7 @@ def load_audit_df() -> pd.DataFrame:
             return pd.DataFrame()
     return pd.DataFrame()
 
-# ---------------- UI ----------------
+# ---------------- UI: header, nav, pages (includes Analize) ----------------
 
 def render_header():
     st.markdown('<div class="header">', unsafe_allow_html=True)
@@ -548,7 +707,6 @@ def render_header():
         st.markdown('<div class="subtitle">Platformă demonstrativă — evaluare predictivă IAAM. Instrument academic pentru screening și suport decizional.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def render_nav():
     menu = [
         ("🏠 Pagina principală", "home"),
@@ -558,6 +716,7 @@ def render_nav():
         ("🧫 Microbiologie", "microbio"),
         ("⚕️ Comorbidități", "comorbid"),
         ("🔬 Analiză urinară", "urine"),
+        ("🧪 Analize laborator", "analize"),
         ("📁 Rezultate & Istoric", "results"),
     ]
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -566,6 +725,40 @@ def render_nav():
             st.session_state['current_page'] = key
     st.markdown('</div>', unsafe_allow_html=True)
 
+# Page: Analize
+def page_analize():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<h4>Analize laborator — markeri infecție și inflamație</h4>', unsafe_allow_html=True)
+    st.markdown('<div class="small-muted">Introduceți ultimele valori de laborator disponibile. Valorile introduse sunt utilizate pentru a ajusta scorul IAAM (orientativ).</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.number_input('Leucocite (WBC, x10^3/µL)', min_value=0.0, max_value=200.0, value=float(st.session_state.get('analize', {}).get('wbc', 8.0)), key='lab_wbc')
+        st.number_input('Neutrofile absolute (x10^3/µL) — (opțional)', min_value=0.0, max_value=200.0, value=float(st.session_state.get('analize', {}).get('neut_abs', 5.0) or 0.0), key='lab_neut_abs')
+        st.number_input('Neutrofile % (opțional)', min_value=0.0, max_value=100.0, value=float(st.session_state.get('analize', {}).get('neut_pct', 70.0) or 0.0), key='lab_neut_pct')
+    with c2:
+        st.number_input('CRP (mg/L)', min_value=0.0, max_value=1000.0, value=float(st.session_state.get('analize', {}).get('crp', 20.0)), key='lab_crp')
+        st.number_input('VSH / ESR (mm/h)', min_value=0.0, max_value=200.0, value=float(st.session_state.get('analize', {}).get('esr', 20.0)), key='lab_esr')
+        st.number_input('Procalcitonină (ng/mL)', min_value=0.0, max_value=100.0, value=float(st.session_state.get('analize', {}).get('pct', 0.1)), key='lab_pct')
+    with c3:
+        st.number_input('Presepsină (pg/mL) — dacă este disponibil', min_value=0.0, max_value=20000.0, value=float(st.session_state.get('analize', {}).get('presepsin', 0.0)), key='lab_presepsin')
+        st.number_input('Lactat (mmol/L)', min_value=0.0, max_value=20.0, value=float(st.session_state.get('analize', {}).get('lactate', 1.0)), key='lab_lactate')
+        st.checkbox('Hemocultură pozitivă', key='lab_blood_culture')
+    # save to session_state['analize']
+    st.session_state['analize'] = {
+        'wbc': st.session_state.get('lab_wbc'),
+        'neut_abs': st.session_state.get('lab_neut_abs'),
+        'neut_pct': st.session_state.get('lab_neut_pct'),
+        'crp': st.session_state.get('lab_crp'),
+        'esr': st.session_state.get('lab_esr'),
+        'pct': st.session_state.get('lab_pct'),
+        'presepsin': st.session_state.get('lab_presepsin'),
+        'lactate': st.session_state.get('lab_lactate'),
+        'blood_culture_positive': st.session_state.get('lab_blood_culture')
+    }
+    st.markdown('<div class="small-muted">Note: pragurile utilizate sunt orientative. Adaptați-le la protocoalele locale.</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------------- Other pages definitions ----------------
 
 def page_home():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -608,6 +801,7 @@ def page_home():
           <li><strong>Microbiologie</strong> — cultură pozitivă, profil de rezistență (ESBL/CRE/KPC/MRSA etc.)</li>
           <li><strong>Comorbidități</strong> — sumar ponderat în stil Charlson-like pentru evaluare a vulnerabilității</li>
           <li><strong>Analiză urinară</strong> — interpretare sediment, nitriți, esteraă, poziționare rezultatelor</li>
+          <li><strong>Analize laborator</strong> — WBC, CRP, PCT, Presepsină, Lactat etc. integrate în scorul IAAM</li>
         </ul>
         """,
         unsafe_allow_html=True,
@@ -615,11 +809,6 @@ def page_home():
     st.markdown('<hr/>', unsafe_allow_html=True)
     st.markdown('<div class="small-muted">Documentație: acest instrument servește ca suport academic. În mediul clinic producție se recomandă validare locală, audit regulat, criptare a datelor și control de acces.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
-# The pages patient/devices/severity/microbio/comorbid/urine/results are similar to the earlier implementation
-# For brevity, reusing the same functions as defined in the initial canvas. We'll include them here (kept concise).
-
-# ---------------- Pages (concise re-declaration) ----------------
 
 def page_patient():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -638,7 +827,6 @@ def page_patient():
     st.markdown('<div class="small-muted">Câmpurile cu * sunt esențiale.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def page_devices():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<h4>Dispozitive invazive (selectați prezența și durata)</h4>', unsafe_allow_html=True)
@@ -650,7 +838,6 @@ def page_devices():
             if present:
                 st.number_input('Zile (durată)', 0, 365, 3, key=f'zile_{d}')
     st.markdown('</div>', unsafe_allow_html=True)
-
 
 def page_severity():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -670,7 +857,6 @@ def page_severity():
     st.markdown('<div class="small-muted">SOFA și qSOFA sunt calculate automat pe baza acestor valori.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def page_microbio():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<h4>Microbiologie</h4>', unsafe_allow_html=True)
@@ -682,7 +868,6 @@ def page_microbio():
             st.multiselect('Profil rezistență', REZISTENTA_PROFILE.get(sel, []), key='profil_rezistenta')
     st.selectbox('Tip infecție (ICD-10)', list(ICD_CODES.keys()), key='tip_infectie')
     st.markdown('</div>', unsafe_allow_html=True)
-
 
 def page_comorbid():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -705,7 +890,6 @@ def page_comorbid():
                             com_select.setdefault(cat, {})[cond] = True
     st.session_state['comorbiditati_selectate'] = com_select
     st.markdown('</div>', unsafe_allow_html=True)
-
 
 def page_urine():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -739,7 +923,6 @@ def page_urine():
         }
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def page_results_and_history():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<h4>Rezultate & Istoric</h4>', unsafe_allow_html=True)
@@ -765,7 +948,7 @@ def page_results_and_history():
             st.markdown('**Componente scor (detaliate)**')
             for d in detalii:
                 st.markdown(f'- {d}')
-            fig = go.Figure(go.Indicator(mode='gauge+number', value=scor, domain={'x':[0,1],'y':[0,1]}, gauge={'axis':{'range':[0,150]}}))
+            fig = go.Figure(go.Indicator(mode='gauge+number', value=scor, domain={'x':[0,1],'y':[0,1]}, gauge={'axis':{'range':[0,200]}}))
             fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=280)
             st.plotly_chart(fig, use_container_width=True)
         with t2:
@@ -783,7 +966,7 @@ def page_results_and_history():
                 for a in atb_map.get(agent, ['Consultați antibiograma locală']):
                     st.markdown(f'- {a}')
         with t3:
-            st.markdown('**Microbiologie & Urină**')
+            st.markdown('**Microbiologie & Urină & Analize**')
             if payload.get('cultura_pozitiva'):
                 st.markdown(f'- Agent: **{payload.get("bacterie")}**')
                 st.markdown(f"- Rezistențe: {', '.join(payload.get('profil_rezistenta', [])) or '—'}")
@@ -796,6 +979,15 @@ def page_results_and_history():
                     st.markdown(f'  - {it}')
             else:
                 st.markdown('- Analiză urinară nedisponibilă')
+
+            # show lab summary
+            analize = payload.get('analize', {})
+            if analize:
+                st.markdown('\n**Rezultate laborator (sumar)**')
+                for k, v in analize.items():
+                    st.markdown(f'- {k}: {v}')
+            else:
+                st.markdown('\n- Rezultate laborator nedisponibile')
         with t4:
             raport = {'meta':{'timestamp': last['timestamp'], 'version': VERSION}, 'pacient': payload, 'result': {'scor': scor, 'nivel': nivel, 'detalii': detalii, 'recomandari': recomandari}}
             st.download_button('📥 Descarcă raport JSON', json.dumps(raport, ensure_ascii=False, indent=2), file_name=f"epimind_{payload.get('nume_pacient')}_{datetime.now().strftime('%Y%m%d')}.json", use_container_width=True)
@@ -827,7 +1019,7 @@ def page_results_and_history():
         st.markdown('Nu există date în auditul local.')
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- Main ----------------
+# ---------------- Main & layout ----------------
 
 def render_current_page():
     page = st.session_state.get('current_page','home')
@@ -845,11 +1037,12 @@ def render_current_page():
         page_comorbid()
     elif page == 'urine':
         page_urine()
+    elif page == 'analize':
+        page_analize()
     elif page == 'results':
         page_results_and_history()
     else:
         st.info('Pagina nu există')
-
 
 def main():
     init_defaults()
