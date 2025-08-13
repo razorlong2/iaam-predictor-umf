@@ -3,25 +3,12 @@
 """
 EpiMind — IAAM Predictor (Single-file, Professional, Mobile-friendly)
 UMF "Grigore T. Popa" Iași — Dr. Boghian Lucian
-Version: 2.1.0 — Complete single-file Streamlit application
+Version: 2.1.0 — Complete single-file Streamlit application (completed)
 
-Features added in this version:
- - Academic, richly-documented homepage (no logos) explaining methods, scope and use.
- - Detailed, well-documented functions for SOFA, qSOFA, APACHE-like score, urinary sediment analysis,
-   Charlson-like comorbidity processing and the IAAM deterministic risk engine.
- - Custom toggleable navigation (works reliably on mobile and desktop) — avoids Streamlit sidebar reopen bug.
- - Responsive CSS tuned for phones and small screens; layout collapses gracefully.
- - Audit log (local CSV), JSON/CSV export, and short CSV report generation.
- - Clear tooltips/help text for nearly every input.
- - Cleaner imports and removed unused code; structured and commented for academic presentation.
+This file is the finished, self-contained version with the menu button placed top-left,
+extensive comorbidity catalogue, responsive UI, audit and export functions.
 
-Notes:
- - This is a demonstrative clinical support tool. It does not replace clinical judgement.
- - Keep data local; for production integrate authentication and encrypted storage.
-
-To run:
-    streamlit run EpiMind_IAAM_Predictor_Full.py
-
+Run: streamlit run EpiMind_IAAM_Predictor_2_1_Completed.py
 """
 
 from __future__ import annotations
@@ -33,7 +20,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 import os
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any
 
 # ---------------- App configuration ----------------
 APP_TITLE = "EpiMind — IAAM Predictor"
@@ -45,7 +32,7 @@ EXPORT_DIR.mkdir(exist_ok=True)
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide", initial_sidebar_state="collapsed")
 
-# ---------------- Minimal responsive CSS (improved) ----------------
+# ---------------- Minimal responsive CSS ----------------
 st.markdown(
     """
     <style>
@@ -66,8 +53,6 @@ st.markdown(
     .risk-moderate { background: rgba(59,130,246,0.05); border-left:4px solid #3B82F6; color:#cfe6ff; }
     .risk-low { background: rgba(16,185,129,0.05); border-left:4px solid #10B981; color:#d7ffe6; }
     .muted-box { background: rgba(255,255,255,0.01); border-radius:8px; padding:8px; }
-
-    /* Mobile tweaks */
     @media (max-width: 760px) {
       .title { font-size:18px; }
       .metric-value { font-size:20px; }
@@ -78,7 +63,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------------- Domain knowledge (concise but extensible) ----------------
+# ---------------- Domain knowledge ----------------
 REZISTENTA_PROFILE = {
     "Escherichia coli": ["ESBL", "CRE", "AmpC", "NDM-1", "CTX-M"],
     "Klebsiella pneumoniae": ["ESBL", "CRE", "KPC", "NDM", "OXA-48"],
@@ -191,22 +176,9 @@ COMORBIDITATI = {
     }
 }
 
-
-# ---------------- Calculators (detailed docstrings) ----------------
+# ---------------- Calculators ----------------
 
 def calculate_sofa_detailed(data: Dict[str, Any]) -> Tuple[int, Dict[str, int]]:
-    """
-    Calculate an extended SOFA score with component breakdown.
-
-    Parameters
-    ----------
-    data : dict
-        Expected keys: pao2_fio2, trombocite, bilirubina, hipotensiune (bool), vasopresoare (bool), glasgow, creatinina, diureza_ml_kg_h
-
-    Returns
-    -------
-    (total_score, components)
-    """
     components = {"Respirator": 0, "Coagulare": 0, "Hepatic": 0, "Cardiovascular": 0, "SNC": 0, "Renal": 0}
     pao2_fio2 = data.get("pao2_fio2", 400)
     if pao2_fio2 < 400:
@@ -269,7 +241,6 @@ def calculate_sofa_detailed(data: Dict[str, Any]) -> Tuple[int, Dict[str, int]]:
 
 
 def calculate_qsofa(data: Dict[str, Any]) -> int:
-    """Compute qSOFA: TAS<100, FR>=22, Glasgow<15"""
     score = 0
     tas = data.get("tas", 120)
     fr = data.get("fr", 18)
@@ -284,10 +255,6 @@ def calculate_qsofa(data: Dict[str, Any]) -> int:
 
 
 def calculate_apache_like(data: Dict[str, Any]) -> int:
-    """
-    A simplified APACHE-II-like aggregate (for additional stratification). This is not
-    a replacement for the validated APACHE II instrument but a pragmatic numerical feature.
-    """
     score = 0
     temp = data.get("temperatura", 37.0)
     if temp >= 41 or temp < 30:
@@ -341,7 +308,6 @@ def calculate_apache_like(data: Dict[str, Any]) -> int:
 
 
 def analyze_urinary_sediment(date: Dict[str, Any]) -> Tuple[List[str], int]:
-    """Detailed urinary sediment interpretation returning lines of interpretation and a risk % (0-100)."""
     interp = []
     risk = 0
     leu = date.get("leu_urina", 0)
@@ -391,10 +357,6 @@ def analyze_urinary_sediment(date: Dict[str, Any]) -> Tuple[List[str], int]:
 
 
 def calculate_charlson_like(comorbidities: Dict[str, Dict[str, Any]]) -> int:
-    """Simplified Charlson-like aggregate based on the COMORBIDITATI mapping.
-
-    The function is intentionally simple: it sums mapped weights and provides a numeric index.
-    """
     score = 0
     for cat, conds in (comorbidities or {}).items():
         for cond, sev in conds.items():
@@ -410,22 +372,9 @@ def calculate_charlson_like(comorbidities: Dict[str, Dict[str, Any]]) -> int:
                 score += 5
     return score
 
-
-# ---------------- Core IAAM deterministic risk engine (well commented) ----------------
+# ---------------- IAAM engine ----------------
 
 def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], List[str]]:
-    """
-    Deterministic IAAM risk engine. Combines:
-     - temporal criteria (>=48h hospitalization),
-     - presence & duration of invasive devices,
-     - microbiology (culture & resistance profile),
-     - severity scores (SOFA, qSOFA) and a simplified APACHE-like score,
-     - urinary sediment risk,
-     - comorbidity burden.
-
-    Returns: (numeric_score, risk_level, details_lines, recommendations)
-    """
-    # Quick temporal gate: if <48h, not IAAM by definition
     hours = payload.get("ore_spitalizare", 0) or 0
     details: List[str] = []
     score = 0
@@ -433,7 +382,6 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
     if hours < 48:
         return 0, "NU IAAM (temporal)", [f"Internare {hours}h <48h: criteriu temporal negat"], ["Monitorizare clinică"]
 
-    # Temporal contribution
     if 48 <= hours < 72:
         score += 5; details.append(f"Timp spitalizare: {hours}h (+5)")
     elif hours < 168:
@@ -441,7 +389,6 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
     else:
         score += 15; details.append(f"Timp spitalizare: {hours}h (+15)")
 
-    # Devices: each device has base risk; longer durations add points
     device_weights = {"CVC": 20, "Ventilatie": 25, "Sonda urinara": 15, "Traheostomie": 20, "Drenaj": 10, "PEG": 12}
     for dev, info in (payload.get("dispozitive") or {}).items():
         if info.get("prezent"):
@@ -452,7 +399,6 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
             score += add
             details.append(f"{dev} ({zile} zile): +{add}")
 
-    # Microbiology
     if payload.get("cultura_pozitiva"):
         agent = payload.get("bacterie", "")
         score += 15
@@ -462,7 +408,6 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
             score += rez_pts
             details.append(f"Rezistență {rez}: +{rez_pts}")
 
-    # Severity scores
     sofa_val, sofa_comp = calculate_sofa_detailed(payload)
     if sofa_val > 0:
         score += sofa_val * 3
@@ -473,27 +418,23 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
         score += 15
         details.append(f"qSOFA: {qsofa_val} (+15)")
 
-    # APACHE-like
     apache_val = calculate_apache_like(payload)
     if apache_val > 0:
-        score += int(apache_val/2)  # contribute but less weight
+        score += int(apache_val/2)
         details.append(f"APACHE-like: {apache_val} (+{int(apache_val/2)})")
 
-    # Urine
     if payload.get("analiza_urina"):
-        interp, risc = analyze_urinary_sediment(payload.get("sediment", {}))
+        interp, risc = analyze_urinary_sediment(payload.get('sediment', {}))
         if risc > 50:
             score += 10
             details.append(f"Risc ITU: {risc}% (+10)")
         details.extend([f"Urină: {line}" for line in interp])
 
-    # Comorbidities
     charlson = calculate_charlson_like(payload.get("comorbiditati", {}))
     if charlson > 0:
         score += charlson
         details.append(f"Comorbidități (sumă puncte): +{charlson}")
 
-    # Determine level and recommendations
     if score >= 100:
         level = "CRITIC"
         recs = [
@@ -516,10 +457,9 @@ def calculate_iaam_risk(payload: Dict[str, Any]) -> Tuple[int, str, List[str], L
 
     return int(score), level, details, recs
 
-# ---------------- Helpers: defaults, payload and audit ----------------
+# ---------------- Helpers ----------------
 
 def init_defaults():
-    """Initialize session state defaults to keep UI stateless and reproducible."""
     defaults = {
         'nume_pacient': 'Pacient_001', 'cnp': '', 'sectie': 'ATI',
         'ore_spitalizare': 96, 'pao2_fio2': 400, 'trombocite': 200,
@@ -536,7 +476,6 @@ def init_defaults():
 
 
 def collect_payload() -> Dict[str, Any]:
-    """Gather current session state into a structured payload for scoring and export."""
     payload = {
         'nume_pacient': st.session_state.get('nume_pacient'),
         'cnp': st.session_state.get('cnp'),
@@ -570,7 +509,6 @@ def collect_payload() -> Dict[str, Any]:
 
 
 def append_audit(result: Dict[str, Any]):
-    """Append a single result to the local CSV audit file. Minimal columns for privacy."""
     row = {
         'timestamp': result['timestamp'],
         'pacient': result['payload'].get('nume_pacient'),
@@ -596,17 +534,18 @@ def load_audit_df() -> pd.DataFrame:
             return pd.DataFrame()
     return pd.DataFrame()
 
-# ---------------- UI: header, nav, pages ----------------
+# ---------------- UI ----------------
 
 def render_header():
     st.markdown('<div class="header">', unsafe_allow_html=True)
-    cols = st.columns([4, 1])
+    cols = st.columns([0.6, 4])
     with cols[0]:
+        if st.button("☰", key='toggle_nav_short'):
+            st.session_state['show_nav'] = not st.session_state.get('show_nav', True)
+        st.markdown('<div style="font-size:12px;color:#9fb0c6;margin-top:6px;">Meniu</div>', unsafe_allow_html=True)
+    with cols[1]:
         st.markdown(f'<div class="title">{APP_TITLE} <span style="font-weight:400;font-size:12px;color:#9fb0c6">v{VERSION}</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="subtitle">Platformă demonstrativă — evaluare predictivă IAAM. Instrument academic pentru screening și suport decizional.</div>', unsafe_allow_html=True)
-    with cols[1]:
-        if st.button("☰ Meniu", key='toggle_nav'):
-            st.session_state['show_nav'] = not st.session_state.get('show_nav', True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -627,7 +566,6 @@ def render_nav():
             st.session_state['current_page'] = key
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Page: Home (academic & detailed)
 
 def page_home():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -650,7 +588,6 @@ def page_home():
         """,
         unsafe_allow_html=True,
     )
-
     st.markdown('<hr/>', unsafe_allow_html=True)
     st.markdown('<h4>Module</h4>', unsafe_allow_html=True)
     cols = st.columns([1,1,1])
@@ -660,7 +597,6 @@ def page_home():
         st.markdown('<div class="muted-box"><strong>Comorbidități</strong><br/>Catalog structurat al afecțiunilor principale (cardiovascular, respirator, metabolic etc.) cu greutăți predefinite pentru model.</div>', unsafe_allow_html=True)
     with cols[2]:
         st.markdown('<div class="muted-box"><strong>Microbiologie & Urină</strong><br/>Permite introducerea rezultatelor culturilor, profilurilor de rezistență și interpretarea sedimentului urinar pentru suspiciune ITU.</div>', unsafe_allow_html=True)
-
     st.markdown('<hr/>', unsafe_allow_html=True)
     st.markdown('<h4>Componente detaliate evaluate</h4>', unsafe_allow_html=True)
     st.markdown(
@@ -676,12 +612,14 @@ def page_home():
         """,
         unsafe_allow_html=True,
     )
-
     st.markdown('<hr/>', unsafe_allow_html=True)
     st.markdown('<div class="small-muted">Documentație: acest instrument servește ca suport academic. În mediul clinic producție se recomandă validare locală, audit regulat, criptare a datelor și control de acces.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- Other pages (streamlined but with details) ----------------
+# The pages patient/devices/severity/microbio/comorbid/urine/results are similar to the earlier implementation
+# For brevity, reusing the same functions as defined in the initial canvas. We'll include them here (kept concise).
+
+# ---------------- Pages (concise re-declaration) ----------------
 
 def page_patient():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -818,7 +756,6 @@ def page_results_and_history():
         with cols[3]:
             qsofa_val = calculate_qsofa(payload); st.markdown(f'<div class="metric"><div class="metric-value">{qsofa_val}</div><div class="small-muted">qSOFA</div></div>', unsafe_allow_html=True)
 
-        # banner
         risk_map = {'CRITIC':'risk-critical','FOARTE ÎNALT':'risk-high','ÎNALT':'risk-high','MODERAT':'risk-moderate','SCĂZUT':'risk-low'}
         banner_class = risk_map.get(nivel, 'risk-low')
         st.markdown(f'<div class="risk-alert {banner_class}">⚠️ <strong>RISC {nivel}</strong> — Scor: {scor} • {payload.get("nume_pacient")}</div>', unsafe_allow_html=True)
@@ -849,7 +786,7 @@ def page_results_and_history():
             st.markdown('**Microbiologie & Urină**')
             if payload.get('cultura_pozitiva'):
                 st.markdown(f'- Agent: **{payload.get("bacterie")}**')
-                st.markdown(f'- Rezistențe: {', '.join(payload.get("profil_rezistenta", [])) or '—'}')
+                st.markdown(f"- Rezistențe: {', '.join(payload.get('profil_rezistenta', [])) or '—'}")
             else:
                 st.markdown('- Fără izolat')
             if payload.get('analiza_urina'):
@@ -861,7 +798,7 @@ def page_results_and_history():
                 st.markdown('- Analiză urinară nedisponibilă')
         with t4:
             raport = {'meta':{'timestamp': last['timestamp'], 'version': VERSION}, 'pacient': payload, 'result': {'scor': scor, 'nivel': nivel, 'detalii': detalii, 'recomandari': recomandari}}
-            st.download_button('📥 Descarcă raport JSON', json.dumps(raport, ensure_ascii=False, indent=2), file_name=f'epimind_{payload.get('nume_pacient')}_{datetime.now().strftime('%Y%m%d')}.json', use_container_width=True)
+            st.download_button('📥 Descarcă raport JSON', json.dumps(raport, ensure_ascii=False, indent=2), file_name=f"epimind_{payload.get('nume_pacient')}_{datetime.now().strftime('%Y%m%d')}.json", use_container_width=True)
             df = pd.DataFrame([{
                 'data': datetime.now().strftime('%Y-%m-%d'),
                 'pacient': payload.get('nume_pacient'),
@@ -870,7 +807,7 @@ def page_results_and_history():
                 'scor': scor,
                 'nivel': nivel
             }])
-            st.download_button('📥 Descarcă CSV scurt', df.to_csv(index=False), file_name=f'epimind_stats_{datetime.now().strftime('%Y%m%d')}.csv', use_container_width=True)
+            st.download_button('📥 Descarcă CSV scurt', df.to_csv(index=False), file_name=f"epimind_stats_{datetime.now().strftime('%Y%m%d')}.csv", use_container_width=True)
     else:
         st.info('Nu există evaluări recente. Completați datele și apăsați butonul de evaluare.')
 
@@ -890,7 +827,29 @@ def page_results_and_history():
         st.markdown('Nu există date în auditul local.')
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- Main & layout ----------------
+# ---------------- Main ----------------
+
+def render_current_page():
+    page = st.session_state.get('current_page','home')
+    if page == 'home':
+        page_home()
+    elif page == 'patient':
+        page_patient()
+    elif page == 'devices':
+        page_devices()
+    elif page == 'severity':
+        page_severity()
+    elif page == 'microbio':
+        page_microbio()
+    elif page == 'comorbid':
+        page_comorbid()
+    elif page == 'urine':
+        page_urine()
+    elif page == 'results':
+        page_results_and_history()
+    else:
+        st.info('Pagina nu există')
+
 
 def main():
     init_defaults()
@@ -905,7 +864,6 @@ def main():
     else:
         render_current_page()
 
-    # bottom controls
     st.markdown('<hr/>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,1,3])
     with c1:
@@ -946,28 +904,6 @@ def main():
             st.experimental_rerun()
     with c3:
         st.markdown('<div class="small-muted">EpiMind • Demo academic • Datele se salvează local (CSV). Pentru producție: integrare autentificare, stocare securizată și audit externalizat.</div>', unsafe_allow_html=True)
-
-
-def render_current_page():
-    page = st.session_state.get('current_page','home')
-    if page == 'home':
-        page_home()
-    elif page == 'patient':
-        page_patient()
-    elif page == 'devices':
-        page_devices()
-    elif page == 'severity':
-        page_severity()
-    elif page == 'microbio':
-        page_microbio()
-    elif page == 'comorbid':
-        page_comorbid()
-    elif page == 'urine':
-        page_urine()
-    elif page == 'results':
-        page_results_and_history()
-    else:
-        st.info('Pagina nu există')
 
 if __name__ == '__main__':
     main()
