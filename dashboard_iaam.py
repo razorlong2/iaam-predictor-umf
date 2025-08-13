@@ -100,22 +100,97 @@ ICD_CODES = {
 
 COMORBIDITATI = {
     "Cardiovascular": {
-        "Insuficiență cardiacă": {"NYHA II": 5, "NYHA III": 10, "NYHA IV": 15},
-        "Cardiopatie ischemică": 8,
-        "Aritmii (FA)": 5
+        "Hipertensiune arterială": {"Controlată": 3, "Necontrolată": 6, "Criză HTA": 12},
+        "Insuficiență cardiacă": {"NYHA I": 3, "NYHA II": 5, "NYHA III": 10, "NYHA IV": 15},
+        "Cardiopatie ischemică": {"Stabilă": 5, "Instabilă": 10},
+        "Infarct miocardic anterior": 8,
+        "Intervenții coronariene" : {"PCI": 5, "CABG": 7},
+        "Aritmii": {"FA paroxistică": 5, "FA permanentă": 7, "TV/TVS": 10},
+        "Valvulopatii semnificative": 8,
+        "Boală arterială periferică": 7,
+        "Tromboembolism venos (ISTORIC)": 6
     },
     "Respirator": {
-        "BPOC": {"GOLD I-II": 5, "GOLD III": 10, "GOLD IV": 15},
-        "Fibroză pulmonară": 12
+        "BPOC": {"GOLD I": 3, "GOLD II": 5, "GOLD III": 10, "GOLD IV": 15},
+        "Astm bronșic": {"Controlat": 3, "Parțial controlat": 5, "Necontrolat": 8},
+        "Fibroză pulmonară": 12,
+        "Pneumopatie interstițială": 10,
+        "HTAP (hipertensiune pulmonară)": 12,
+        "Sindrom apnee somn (SAS)": 5,
+        "Bronșiectazii": 7,
+        "Tuberculoză pulmonară (istoric/activ)": {"Istoric": 3, "Activă": 10}
     },
     "Metabolic": {
-        "Diabet zaharat": {"Tip 1": 10, "Tip 2 controlat": 5, "Tip 2 necontrolat": 12},
-        "Obezitate (BMI>30)": {"30-35": 3, "35-40": 5, ">40": 8}
+        "Diabet zaharat": {"Tip 1": 10, "Tip 2 controlat": 5, "Tip 2 necontrolat": 12, "Cu complicații micro/macrovasculare": 15},
+        "Obezitate": {"BMI 25-30": 2, "BMI 30-35": 3, "BMI 35-40": 5, "BMI >40": 8},
+        "Sindrom metabolic": 6,
+        "Dislipidemie": 3,
+        "Steatoză/NAFLD": 4,
+        "Guta/hiperuricemie": 4
     },
-    "Renal": {"BCR stadiul 3": 8, "Dializă": 20},
-    "Oncologic": {"Neoplasm activ": 15, "Chimioterapie (în curs)": 20},
-    "Imunologic": {"Transplant organ": 18, "Imunosupresie medicamentosă": 15}
+    "Renal": {
+        "BCR stadiul 1-2": 3,
+        "BCR stadiul 3a": 5,
+        "BCR stadiul 3b": 8,
+        "BCR stadiul 4": 12,
+        "BCR stadiul 5 (insuficiență renală severă)": 15,
+        "Hemodializă": 20,
+        "Dializă peritoneală": 18,
+        "Transplant renal": 15,
+        "Proteinurie/nephropatie diabetică": 8
+    },
+    "Hepatic": {
+        "Steatoză hepatică": 3,
+        "Hepatită cronică B/C": 10,
+        "Ciroză": {"Child A": 8, "Child B": 12, "Child C": 18},
+        "Insuficiență hepatică acută": 20,
+        "Transplant hepatic": 15
+    },
+    "Oncologic": {
+        "Neoplasm solid activ": 15,
+        "Neoplasm metastazat": 25,
+        "Neoplasm hematologic": 18,
+        "Chimioterapie curentă": 20,
+        "Radioterapie (în curs)": 12,
+        "Imunoterapie/terapii biologice": 15,
+        "Neutropenie": {"<1000": 15, "<500": 25, "<100": 35},
+        "Post-TCSH (transplant celule stem)": 25
+    },
+    "Imunologic/Infectios": {
+        "HIV/SIDA": {"CD4>500": 10, "CD4 200-500": 15, "CD4<200": 25},
+        "Transplant organ solid": 18,
+        "Imunosupresie medicamentoasă": {"Corticoterapie": 10, "Imunosupresoare": 15, "Biologice": 12},
+        "Splenectomie": 10,
+        "Deficit imun primar": 20,
+        "Corticoterapie cronică (doses med-high)": 10
+    },
+    "Neurologic": {
+        "AVC recent (<3 luni)": 10,
+        "AVC vechi": 5,
+        "Demență": 8,
+        "Boală Parkinson": 6,
+        "Epilepsie": 5,
+        "Scleroză multiplă": 8,
+        "Leziune medulară/neurologică severă": 12
+    },
+    "Hematologic/Coagulare": {
+        "Anemie moderată": 4,
+        "Anemie severă": 8,
+        "Tulburări de coagulare (hemofilie, VWD)": 10,
+        "Tromboză venoasă profundă activă": 8,
+        "Terapie anticoagulantă cronică": 5,
+        "Hemoglobinopatii (ex. drepanocitoză)": 10
+    },
+    "Endocrin/Alte": {
+        "Boli tiroidiene (hipo/hiper)": 3,
+        "Insuficiență suprarenală": 8,
+        "Sarcină": {"Trimestrul 1": 3, "Trimestrul 2": 4, "Trimestrul 3": 6},
+        "Malnutriție/IMC scăzut": {"Ușoară": 3, "Moderat": 6, "Severă": 10},
+        "Arsuri severe": 15,
+        "Fragilitate/geriatrie": 8
+    }
 }
+
 
 # ---------------- Calculators (detailed docstrings) ----------------
 
